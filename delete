@@ -1,0 +1,83 @@
+import os
+import fdb
+import PySimpleGUI as sg
+
+# Ruta donde se encuentra la base de datos Firebird
+ruta_base_datos = r'C:\Microsip datos\GRUPOISTMO.fdb'
+
+# Definir el diseño de la ventana
+layout = [
+    [sg.Text('Ingrese su nombre de usuario:'), sg.InputText(key='-USUARIO-')],
+    [sg.Text('Ingrese su contraseña:'), sg.InputText(key='-CONTRASEÑA-', password_char='*')],
+    [sg.Button('Aceptar')]
+]
+
+# Crear la ventana
+window = sg.Window('Iniciar sesión', layout, finalize=True)
+
+while True:
+    event, values = window.read()
+
+    if event == sg.WINDOW_CLOSED:
+        break
+    elif event == 'Aceptar':
+        usuario = values['-USUARIO-']
+        contraseña = values['-CONTRASEÑA-']
+
+        if os.path.exists(ruta_base_datos):
+            print(f"Conectando a la base de datos en {ruta_base_datos}...")
+
+            try:
+                con = fdb.connect(
+                    dsn=f'localhost/3050:{ruta_base_datos}',
+                    user=usuario,
+                    password=contraseña
+                )
+
+                # Crea un cursor para ejecutar consultas
+                cur = con.cursor()
+
+                try:
+                    # Verificar si la tabla está en uso
+                    table_in_use_query = """
+                    SELECT a.MON$ATTACHMENT_ID
+                    FROM MON$ATTACHMENTS a
+                    INNER JOIN MON$TRANSACTIONS t ON a.MON$ATTACHMENT_ID = t.MON$ATTACHMENT_ID
+                    WHERE a.MON$ATTACHMENT_ID <> CURRENT_CONNECTION AND t.MON$STATE = 1 AND a.MON$REMOTE_PROTOCOL IS NOT NULL
+                    """
+                    cur.execute(table_in_use_query)
+
+                    if cur.fetchone():
+                        sg.PopupError('La tabla está en uso por otra conexión. No se puede realizar la eliminación.')
+
+                    else:
+                        # Consulta de eliminación con nombres de columna calificados
+                        delete_query = 'DELETE FROM exp_sync_id'
+                        print('Query:', delete_query)
+
+                        # Ejecuta la consulta para borrar datos de la tabla exp_sync_id
+                        cur.execute(delete_query)
+
+                        # Confirma la transacción
+                        con.commit()
+
+                        sg.Popup('Datos borrados exitosamente.')
+
+                except Exception as e:
+                    # En caso de error, muestra el mensaje de error completo en una ventana emergente
+                    sg.PopupError(f'Error: {str(e)}')
+
+                finally:
+                    # Cierra el cursor y la conexión
+                    cur.close()
+                    con.close()
+
+                break  # Sale del bucle si la conexión se realiza correctamente
+
+            except fdb.OperationalError:
+                sg.Popup("Usuario o Contraseña incorrecto.")
+
+        else:
+            sg.Popup(f"La base de datos {ruta_base_datos} no existe.")
+
+# Cierra la ventana al finalizar
